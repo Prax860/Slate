@@ -78,6 +78,11 @@ export default function WhiteboardCanvas() {
   const userIdRef = useRef<string>('');
   const usernameRef = useRef<string>('');
   const [whiteboard, setWhiteboard] = useState<Whiteboard | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareCode, setShareCode] = useState<string | null>(null);
+  const [shareCodeExpiry, setShareCodeExpiry] = useState<number | null>(null);
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [shareCopyMessage, setShareCopyMessage] = useState('');
   const router = useRouter();
   const params = useParams();
   const boardId = (params?.id as string) || '';
@@ -115,6 +120,17 @@ export default function WhiteboardCanvas() {
       }
     }
   }, [isLoaded, user, boardId, router]);
+
+  // Update share code expiry timer
+  useEffect(() => {
+    if (!shareCodeExpiry) return;
+
+    const interval = setInterval(() => {
+      getTimeRemaining();
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [shareCodeExpiry]);
 
   // Initialize canvas and socket
   useEffect(() => {
@@ -386,6 +402,68 @@ export default function WhiteboardCanvas() {
     router.push('/dashboard');
   };
 
+  const generateShareCode = async () => {
+    if (!whiteboard || !userIdRef.current) return;
+
+    setIsGeneratingCode(true);
+    try {
+      const response = await fetch('/api/share', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          boardId: whiteboard.id,
+          boardName: whiteboard.name,
+          userId: userIdRef.current,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to generate share code');
+
+      const data = await response.json();
+      setShareCode(data.shareCode);
+      setShareCodeExpiry(data.expiresAt);
+
+      // Clear message after 3 seconds
+      setShareCopyMessage('');
+    } catch (error) {
+      console.error('Error generating share code:', error);
+      setShareCopyMessage('Failed to generate code');
+    } finally {
+      setIsGeneratingCode(false);
+    }
+  };
+
+  const copyToClipboard = () => {
+    if (shareCode) {
+      const shareUrl = `${window.location.origin}/dashboard?joinCode=${shareCode}`;
+      navigator.clipboard.writeText(shareUrl);
+      setShareCopyMessage('Link copied to clipboard!');
+      setTimeout(() => setShareCopyMessage(''), 3000);
+    }
+  };
+
+  const shareViaEmail = () => {
+    if (shareCode) {
+      const shareUrl = `${window.location.origin}/dashboard?joinCode=${shareCode}`;
+      const subject = `Join my whiteboard: ${whiteboard?.name}`;
+      const body = `I'd like to invite you to collaborate on my whiteboard. Click the link below to join:\n\n${shareUrl}\n\nThis link expires in 5 minutes.`;
+      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    }
+  };
+
+  const getTimeRemaining = () => {
+    if (!shareCodeExpiry) return '';
+    const remaining = Math.ceil((shareCodeExpiry - Date.now()) / 1000);
+    if (remaining <= 0) {
+      setShareCode(null);
+      setShareCodeExpiry(null);
+      return 'Expired';
+    }
+    return `${remaining}s`;
+  };
+
   if (!whiteboard || !usernameRef.current) {
     return (
       <div className="w-full h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
@@ -594,7 +672,123 @@ export default function WhiteboardCanvas() {
         >
           🗑 Clear
         </motion.button>
+
+        <motion.button
+          onClick={() => setShowShareModal(true)}
+          className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white text-sm rounded-lg hover:from-purple-700 hover:to-purple-600 transition-all"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          🔗 Share
+        </motion.button>
       </motion.div>
+
+      {/* Share Modal */}
+      <AnimatePresence>
+        {showShareModal && (
+          <motion.div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowShareModal(false)}
+          >
+            <motion.div
+              className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-8 max-w-md w-full mx-4 border border-purple-500/20 shadow-2xl"
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent mb-6">
+                Share Whiteboard
+              </h2>
+
+              {!shareCode ? (
+                <div className="space-y-4">
+                  <p className="text-gray-300 text-sm">
+                    Generate a one-time share code to invite others to collaborate on this whiteboard. The code expires in 5 minutes.
+                  </p>
+                  <motion.button
+                    onClick={generateShareCode}
+                    disabled={isGeneratingCode}
+                    className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-purple-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    {isGeneratingCode ? 'Generating...' : 'Generate Share Code'}
+                  </motion.button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="bg-slate-800/50 rounded-lg p-4 border border-purple-500/30">
+                    <p className="text-xs text-gray-400 mb-2">Share Code:</p>
+                    <p className="text-2xl font-mono font-bold text-purple-300 tracking-widest">
+                      {shareCode}
+                    </p>
+                    <div className="mt-3 flex items-center justify-between">
+                      <p className="text-xs text-gray-400">
+                        Expires in: <span className="text-yellow-400 font-semibold">{getTimeRemaining()}</span>
+                      </p>
+                      <motion.button
+                        onClick={() => {
+                          setShareCode(null);
+                          setShareCodeExpiry(null);
+                        }}
+                        className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-gray-300 transition-colors"
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        Clear
+                      </motion.button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <motion.button
+                      onClick={copyToClipboard}
+                      className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all flex items-center justify-center gap-2"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      📋 Copy Share Link
+                    </motion.button>
+
+                    <motion.button
+                      onClick={shareViaEmail}
+                      className="w-full px-4 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 text-white font-semibold rounded-lg hover:from-amber-700 hover:to-amber-600 transition-all flex items-center justify-center gap-2"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      📧 Share via Email
+                    </motion.button>
+                  </div>
+
+                  {shareCopyMessage && (
+                    <motion.div
+                      className="text-center text-sm font-semibold text-green-400"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                    >
+                      {shareCopyMessage}
+                    </motion.div>
+                  )}
+
+                  <motion.button
+                    onClick={() => setShowShareModal(false)}
+                    className="w-full px-4 py-2 bg-slate-700 hover:bg-slate-600 text-gray-300 font-semibold rounded-lg transition-colors"
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    Close
+                  </motion.button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

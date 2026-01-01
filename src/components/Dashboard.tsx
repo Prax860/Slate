@@ -79,6 +79,7 @@ export default function Dashboard() {
   const [newBoardName, setNewBoardName] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [joinMessage, setJoinMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -98,8 +99,67 @@ export default function Dashboard() {
           // Ignore invalid JSON
         }
       }
+
+      // Handle share code from URL
+      const params = new URLSearchParams(window.location.search);
+      const joinCode = params.get('joinCode');
+
+      if (joinCode) {
+        handleJoinViaShareCode(joinCode);
+        // Remove the code from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
     }
   }, [user?.id, isLoaded, router]);
+
+  const handleJoinViaShareCode = async (shareCode: string) => {
+    try {
+      const response = await fetch(`/api/share?code=${shareCode}`);
+
+      if (!response.ok) {
+        setJoinMessage({
+          text: 'Share code expired or invalid. Please ask for a new one.',
+          type: 'error',
+        });
+        return;
+      }
+
+      const boardData = await response.json();
+
+      // Check if user already has this board
+      const existingBoard = whiteboards.find((b) => b.id === boardData.boardId);
+
+      if (!existingBoard && user) {
+        // Add this board to user's boards
+        const newBoard: Whiteboard = {
+          id: boardData.boardId,
+          name: boardData.boardName,
+          createdAt: new Date().toISOString(),
+          participantCount: 1,
+        };
+
+        const updated = [newBoard, ...whiteboards];
+        setWhiteboards(updated);
+        localStorage.setItem(`whiteboards_${user.id}`, JSON.stringify(updated));
+      }
+
+      setJoinMessage({
+        text: 'Successfully joined the whiteboard! Redirecting...',
+        type: 'success',
+      });
+
+      // Redirect to the whiteboard after 1.5 seconds
+      setTimeout(() => {
+        router.push(`/whiteboard/${boardData.boardId}`);
+      }, 1500);
+    } catch (error) {
+      console.error('Error joining via share code:', error);
+      setJoinMessage({
+        text: 'Failed to validate share code. Please try again.',
+        type: 'error',
+      });
+    }
+  };
 
   const createWhiteboard = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,6 +274,24 @@ export default function Dashboard() {
           </SignOutButton>
         </div>
       </motion.header>
+
+      {/* Join Message Notification */}
+      <AnimatePresence>
+        {joinMessage && (
+          <motion.div
+            className={`fixed top-20 left-1/2 transform -translate-x-1/2 px-6 py-4 rounded-lg font-semibold shadow-lg z-50 ${
+              joinMessage.type === 'success'
+                ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white'
+                : 'bg-gradient-to-r from-red-600 to-pink-600 text-white'
+            }`}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+          >
+            {joinMessage.text}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Content */}
       <motion.main
