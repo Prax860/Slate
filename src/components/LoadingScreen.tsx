@@ -19,7 +19,7 @@ const itemVariants = {
     y: 0,
     transition: {
       duration: 0.8,
-      ease: 'easeOut',
+      ease: 'easeOut' as const,
     },
   },
 };
@@ -30,7 +30,7 @@ const orbitVariants = {
     transition: {
       duration: 20,
       repeat: Infinity,
-      ease: 'linear',
+      ease: "linear" as const,
     },
   },
 };
@@ -156,7 +156,7 @@ export default function LoadingScreen() {
             transition={{
               duration: 2,
               repeat: Infinity,
-              ease: 'easeInOut',
+              ease: 'easeInOut' as const,
             }}
           />
         </motion.div>

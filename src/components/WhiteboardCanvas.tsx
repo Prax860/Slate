@@ -65,6 +65,7 @@ export default function WhiteboardCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gridCanvasRef = useRef<HTMLCanvasElement>(null);
   const socketRef = useRef<Socket | null>(null);
+  const socketBoardIdRef = useRef<string>('');
   const [isDrawing, setIsDrawing] = useState(false);
   const [color, setColor] = useState(colors[0]);
   const [brushSize, setBrushSize] = useState(3);
@@ -137,7 +138,7 @@ export default function WhiteboardCanvas() {
     if (!whiteboard || !userIdRef.current || !usernameRef.current) return;
 
     // Only initialize if socket isn't already connected to this board
-    if (socketRef.current?.connected && socketRef.current?.io._query?.boardId === boardId) {
+    if (socketRef.current?.connected && socketBoardIdRef.current === boardId) {
       return;
     }
 
@@ -202,6 +203,7 @@ export default function WhiteboardCanvas() {
     });
 
     socketRef.current = socket;
+    socketBoardIdRef.current = boardId;
 
     socket.on('connect', () => {
       console.log('Connected to socket server');
