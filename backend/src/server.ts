@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from 'redis';
 import { nanoid } from 'nanoid';
+import http from 'http';
 
 dotenv.config();
 
@@ -104,7 +105,8 @@ interface CustomSocket extends Socket {
   boardId?: string;
 }
 
-const httpServer: HTTPServer = require('http').createServer(app);
+
+const httpServer = http.createServer(app);
 const io: IOServer = new IOServer(httpServer, {
   cors: {
     origin: FRONTEND_URL,
