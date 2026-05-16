@@ -13,26 +13,40 @@ export interface CachedUser {
   drawingCount: number;
 }
 
-export const cacheUser = async (user: CachedUser) => {
+const USER_CACHE_TTL = 30 * 24 * 60 * 60; // 30 days
+
+export const cacheUser = async (
+  user: CachedUser
+): Promise<void> => {
   try {
     await connectRedis();
-    
-    // Cache user for 30 days
+
     const cacheKey = `user:${user.id}`;
+
+    const updatedUser: CachedUser = {
+      ...user,
+      lastActive: new Date().toISOString(),
+    };
+
+    // Store user data
     await redisClient.setEx(
       cacheKey,
-      30 * 24 * 60 * 60, // 30 days in seconds
-      JSON.stringify({
-        ...user,
-        lastActive: new Date().toISOString(),
-      })
+      USER_CACHE_TTL,
+      JSON.stringify(updatedUser)
     );
 
-    // Add to frequent users set
+    // Track recent/frequent users
     await redisClient.zAdd('frequent_users', {
       score: Date.now(),
-      member: user.id,
+      value: user.id,
     });
+
+    // Optional: keep only latest 1000 users
+    await redisClient.zRemRangeByRank(
+      'frequent_users',
+      0,
+      -1001
+    );
 
     console.log(`Cached user: ${user.id}`);
   } catch (error) {
@@ -40,78 +54,104 @@ export const cacheUser = async (user: CachedUser) => {
   }
 };
 
-export const getUserFromCache = async (userId: string): Promise<CachedUser | null> => {
+export const getUserFromCache = async (
+  userId: string
+): Promise<CachedUser | null> => {
   try {
     await connectRedis();
-    
+
     const cacheKey = `user:${userId}`;
+
     const cached = await redisClient.get(cacheKey);
-    
+
     if (!cached) return null;
-    
-    const user = JSON.parse(cached) as CachedUser;
-    
-    // Update last active
+
+    let user: CachedUser;
+
+    try {
+      user = JSON.parse(cached);
+    } catch (parseError) {
+      console.error('Invalid cached JSON:', parseError);
+      return null;
+    }
+
+    // Refresh TTL + update activity
+    const updatedUser: CachedUser = {
+      ...user,
+      lastActive: new Date().toISOString(),
+    };
+
     await redisClient.setEx(
       cacheKey,
-      30 * 24 * 60 * 60,
-      JSON.stringify({
-        ...user,
-        lastActive: new Date().toISOString(),
-      })
+      USER_CACHE_TTL,
+      JSON.stringify(updatedUser)
     );
 
-    return user;
+    return updatedUser;
   } catch (error) {
     console.error('Error getting cached user:', error);
     return null;
   }
 };
 
-export const getFrequentUsers = async (limit = 10): Promise<CachedUser[]> => {
+export const getFrequentUsers = async (
+  limit = 10
+): Promise<CachedUser[]> => {
   try {
     await connectRedis();
-    
-    const userIds = await redisClient.zRange('frequent_users', 0, limit - 1, {
-      byScore: true,
-      rev: true,
-    });
 
-    const users: CachedUser[] = [];
-    
-    for (const userId of userIds) {
-      const user = await getUserFromCache(userId);
-      if (user) users.push(user);
-    }
+    const userIds = await redisClient.zRange(
+      'frequent_users',
+      0,
+      limit - 1,
+      {
+        REV: true,
+      }
+    );
 
-    return users;
+    const users = await Promise.all(
+      userIds.map((id) => getUserFromCache(id))
+    );
+
+    return users.filter(Boolean) as CachedUser[];
   } catch (error) {
     console.error('Error getting frequent users:', error);
     return [];
   }
 };
 
-export const updateUserActivity = async (userId: string) => {
+export const updateUserActivity = async (
+  userId: string
+): Promise<void> => {
   try {
     await connectRedis();
-    
+
     const user = await getUserFromCache(userId);
-    if (user) {
-      user.lastActive = new Date().toISOString();
-      await cacheUser(user);
-    }
+
+    if (!user) return;
+
+    await cacheUser({
+      ...user,
+      lastActive: new Date().toISOString(),
+    });
   } catch (error) {
     console.error('Error updating user activity:', error);
   }
 };
 
-export const clearUserCache = async (userId: string) => {
+export const clearUserCache = async (
+  userId: string
+): Promise<void> => {
   try {
     await connectRedis();
-    
+
     await redisClient.del(`user:${userId}`);
-    await redisClient.zRem('frequent_users', userId);
-    
+
+    await redisClient.zRem(
+      'frequent_users',
+      userId
+    );
+
     console.log(`Cleared cache for user: ${userId}`);
   } catch (error) {
     console.error('Error clearing user cache:', error);
